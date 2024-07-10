@@ -82,7 +82,7 @@ if __name__ == '__main__':
         ).to(device)
     else:
         train_dataset = CustomTensorDataset(
-            data=(data[train_slice])
+            data=(data[:, train_slice])
         )
 
         train_loader = torch.utils.data.DataLoader(
