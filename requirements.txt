@@ -4,7 +4,7 @@ pandas==1.4.4
 PyYAML==6.0
 PyYAML==6.0
 scikit_learn==1.1.1
-timm==0.6.12
+timm
 torch==2.0.0
 tqdm==4.64.1
 tensorboard
