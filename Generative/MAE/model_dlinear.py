@@ -158,24 +158,31 @@ class MAE_ViT_Dlinear(torch.nn.Module):
         predicted_x, mask = self.decoder(features, backward_indexes)
         return predicted_x, mask
 
-class ViT_Classifier(torch.nn.Module):
-    def __init__(self, encoder : MAE_Encoder_Dlinear, num_classes=5) -> None:
+class ViT_Forecasting(torch.nn.Module):
+    def __init__(self, encoder : MAE_Encoder_Dlinear, n_covariate=7, pred_len=24) -> None:
         super().__init__()
         self.cls_token = encoder.cls_token
         self.pos_embedding = encoder.pos_embedding
         self.patchify = encoder.patchify
         self.transformer = encoder.transformer
         self.layer_norm = encoder.layer_norm
-        self.head = torch.nn.Linear(self.pos_embedding.shape[-1], num_classes)
+        self.head = torch.nn.Linear(self.pos_embedding.shape[-1], n_covariate*pred_len)
 
-    def forward(self, x):
+    def forward(self, x_avg, x_err):
 
-        patches = self.patchify(x)
-        patches = rearrange(patches, 'b c h w -> (h w) b c')
-        patches = patches + self.pos_embedding
-        patches = torch.cat([self.cls_token.expand(-1, patches.shape[1], -1), patches], dim=0)
-        patches = rearrange(patches, 't b c -> b t c')
-        features = self.layer_norm(self.transformer(patches))
+        patches_avg = self.patchify(x_avg)
+        patches_err = self.patchify(x_err)
+        patches_avg = rearrange(patches_avg, 'b c h w -> (h w) b c')
+        patches_err = rearrange(patches_err, 'b c h w -> (h w) b c')
+        patches_avg = patches_avg + self.pos_embedding
+        patches_err = patches_err + self.pos_embedding
+        patches_avg = torch.cat([self.cls_token.expand(-1, patches_avg.shape[1], -1), patches_err], dim=0)
+        patches_err = torch.cat([self.cls_token.expand(-1, patches_err.shape[1], -1), patches_err], dim=0)
+        patches_avg = rearrange(patches_avg, 't b c -> b t c')
+        patches_err = rearrange(patches_err, 't b c -> b t c')
+        features_avg = self.layer_norm(self.transformer(patches_avg))
+        features_err = self.layer_norm(self.transformer(patches_err))
+        features = features_avg + features_err
         features = rearrange(features, 'b t c -> t b c')
         logits = self.head(features[0])
         return logits
