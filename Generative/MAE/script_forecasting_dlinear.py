@@ -34,12 +34,28 @@ def custom_collate_fn(batch, n_time_cols=7):
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description="MAE")
-    # parser.add_argument("--dataset", default='ETTh1', type=str)
-    # args = parser.parse_args()
 
-    config = yaml_config_hook(f"config/ETTh1_config_MAE.yaml")
-    for k, v in config.items():
-        parser.add_argument(f"--{k}", default=v, type=type(v))
+    parser.add_argument('--dataset', default='ETTh1', type=str)
+    parser.add_argument('--mode', default='MAE', type=str)
+    parser.add_argument('--seed', default=42, type=int)
+    parser.add_argument('--batch_size', default=64, type=int)
+    parser.add_argument('--max_device_batch_size', default=64, type=int)
+    parser.add_argument('--base_learning_rate', default=1.5e-4, type=float)
+    parser.add_argument('--weight_decay', default=0.05, type=float)
+    parser.add_argument('--mask_ratio', default=0.75, type=float)
+    parser.add_argument('--total_epoch', default=200, type=int)
+    parser.add_argument('--warmup_epoch', default=5, type=int)
+    parser.add_argument('--emb_dim', default=64, type=int)
+    parser.add_argument('--model_path', default='save', type=str)
+    parser.add_argument('--n_channel', default=7, type=int)
+    parser.add_argument('--n_length', default=336, type=int)
+    parser.add_argument('--patch_size', default=16, type=int)
+    parser.add_argument('--labelled_ratio', default=0.1, type=float)
+    parser.add_argument('--finetune_batch_size', default=64, type=int)
+    parser.add_argument('--finetune_base_learning_rate', default=0.001, type=float)
+    parser.add_argument('--finetune_epochs', default=31, type=int)
+    parser.add_argument('--finetune_seed', default=42, type=int)
+    parser.add_argument('--pretrain', default=True, type=bool)
 
     args = parser.parse_args()
     setup_seed(args.seed)
@@ -66,37 +82,21 @@ if __name__ == '__main__':
     vali_data = data[:, valid_slice]
     test_data = data[:, test_slice]
 
-    if args.mode == 'dlinear':
-        train_dataset = TimeSeriesDatasetWithMovingAvg(torch.from_numpy(train_data).to(torch.float), n_time_cols=n_time_cols, seq_len=args.n_length, pred_len=args.pred_len)
 
-        train_loader = torch.utils.data.DataLoader(
-            train_dataset,
-            batch_size=load_batch_size,
-            shuffle=True,
-            # collate_fn=custom_collate_fn
-        )
+    train_dataset = TimeSeriesDatasetWithMovingAvg(torch.from_numpy(train_data).to(torch.float), n_time_cols=n_time_cols, seq_len=args.n_length, pred_len=pred_lens[0])
 
-        model = MAE_ViT_Dlinear(
-            sample_shape=[args.n_channel + n_time_cols, args.n_length],
-            patch_size=(args.n_channel + n_time_cols, args.patch_size),
-            mask_ratio=args.mask_ratio
-        ).to(device)
-    else:
-        train_dataset = TensorDataset(
-            torch.from_numpy(train_data).to(torch.float)
-        )
+    train_loader = torch.utils.data.DataLoader(
+        train_dataset,
+        batch_size=load_batch_size,
+        shuffle=True,
+        # collate_fn=custom_collate_fn
+    )
 
-        train_loader = torch.utils.data.DataLoader(
-            train_dataset,
-            batch_size=load_batch_size,
-            shuffle=True,
-        )
-
-        model = MAE_ViT(
-            sample_shape=[args.n_channel, args.n_length],
-            patch_size=(args.n_channel, args.patch_size),
-            mask_ratio=args.mask_ratio
-        ).to(device)
+    model = MAE_ViT_Dlinear(
+        sample_shape=[args.n_channel + n_time_cols, args.n_length],
+        patch_size=(args.n_channel + n_time_cols, args.patch_size),
+        mask_ratio=args.mask_ratio
+    ).to(device)
 
     optim = torch.optim.AdamW(
         model.parameters(),
@@ -117,7 +117,7 @@ if __name__ == '__main__':
         print('===== start training ======')
         losses = []
         # for sample, label in tqdm(iter(train_loader)):
-        for sample_avg, sample_err, y in tqdm(iter(train_loader)):
+        for sample_avg, sample_err, _ in tqdm(iter(train_loader)):
             step_count += 1
 
             sample_avg = sample_avg.swapaxes(1, 2)

@@ -10,9 +10,9 @@ import random
 from model import *
 from utils import yaml_config_hook
 from datautils import load_forecast_csv
-from finetune_train_tensor_dataset import TimeSeriesDatasetWithMovingAvg_Finetune
+from finetune_train_tensor_dataset import TimeSeriesDataset_Finetune
 
-from model_dlinear import MAE_ViT_Dlinear, ViT_Forecasting
+from model import MAE_ViT, ViT_Forecasting
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -39,10 +39,27 @@ def cal_metrics(pred, target):
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description="MAE")
-
-    config = yaml_config_hook(f"config/ETTh1_config_MAE.yaml")
-    for k, v in config.items():
-        parser.add_argument(f"--{k}", default=v, type=type(v))
+    parser.add_argument('--dataset', default='ETTh1', type=str)
+    parser.add_argument('--mode', default='MAE', type=str)
+    parser.add_argument('--seed', default=42, type=int)
+    parser.add_argument('--batch_size', default=64, type=int)
+    parser.add_argument('--max_device_batch_size', default=64, type=int)
+    parser.add_argument('--base_learning_rate', default=1.5e-4, type=float)
+    parser.add_argument('--weight_decay', default=0.05, type=float)
+    parser.add_argument('--mask_ratio', default=0.75, type=float)
+    parser.add_argument('--total_epoch', default=200, type=int)
+    parser.add_argument('--warmup_epoch', default=5, type=int)
+    parser.add_argument('--emb_dim', default=64, type=int)
+    parser.add_argument('--model_path', default='save', type=str)
+    parser.add_argument('--n_channel', default=7, type=int)
+    parser.add_argument('--n_length', default=336, type=int)
+    parser.add_argument('--patch_size', default=16, type=int)
+    parser.add_argument('--labelled_ratio', default=0.1, type=float)
+    parser.add_argument('--finetune_batch_size', default=64, type=int)
+    parser.add_argument('--finetune_base_learning_rate', default=0.001, type=float)
+    parser.add_argument('--finetune_epochs', default=31, type=int)
+    parser.add_argument('--finetune_seed', default=42, type=int)
+    parser.add_argument('--pretrain', default=True, type=bool)
 
     args = parser.parse_args()
 
@@ -63,98 +80,104 @@ if __name__ == '__main__':
     vali_data = data[:, valid_slice]
     test_data = data[:, test_slice]
 
-    train_dataset = TimeSeriesDatasetWithMovingAvg_Finetune(
-        original_dataset=torch.from_numpy(train_data).to(torch.float),
-        n_time_cols=n_time_cols,
-        seq_len=args.n_length,
-        pred_len=args.pred_len,
-        labelled_ratio=args.labelled_ratio,
-        mode='train'
-    )
-
-    # load val data
-    val_dataset = TimeSeriesDatasetWithMovingAvg_Finetune(
-        original_dataset=torch.from_numpy(vali_data).to(torch.float),
-        n_time_cols=n_time_cols,
-        seq_len=args.n_length,
-        pred_len=args.pred_len,
-        labelled_ratio=args.labelled_ratio,
-        mode='val'
-    )
-
-    # load test data
-    test_dataset = TimeSeriesDatasetWithMovingAvg_Finetune(
-        original_dataset=torch.from_numpy(test_data).to(torch.float),
-        n_time_cols=n_time_cols,
-        seq_len=args.n_length,
-        pred_len=args.pred_len,
-        labelled_ratio=args.labelled_ratio,
-        mode='test'
-    )
-
-    train_dataloader = torch.utils.data.DataLoader(
-        train_dataset,
-        args.finetune_batch_size,
-        shuffle=True,
-        drop_last=True
-    )
-
-    val_dataloader = torch.utils.data.DataLoader(
-        val_dataset,
-        args.finetune_batch_size,
-        shuffle=True,
-        drop_last=True
-    )
-
-    test_dataloader = torch.utils.data.DataLoader(
-        test_dataset,
-        args.finetune_batch_size,
-        shuffle=True,
-        drop_last=True
-    )
-
-    model = MAE_ViT_Dlinear(
-        sample_shape=[args.n_channel + n_time_cols, args.n_length],
-        patch_size=(args.n_channel + n_time_cols, args.patch_size),
-        mask_ratio=args.mask_ratio
-    )
-
-    global arch
-    if args.pretrain == True:
-        model_fp = os.path.join(args.model_path, "forecasting/{}/Pretrained_{}_{}".format(
-            args.mode, args.dataset, args.emb_dim), "Pretrained_{}_{}".format(args.dataset, args.emb_dim) + ".pkl")
-        model.load_state_dict(torch.load(model_fp, map_location=args.device.type))
-
-        arch = args.dataset
-        print("With pretrain.")
-    else:
-        arch = args.dataset + "_no_pre"
-        print("No pretrain.")
-
-    model = ViT_Forecasting(model.encoder, n_covariate=args.n_channel, pred_len=args.pred_len).to(args.device)
-
-    Finetune_mode = "Full"  # or "Partial"
-    if Finetune_mode == "Full":
-        optimizer = torch.optim.AdamW(model.parameters(), lr=args.finetune_base_learning_rate * args.finetune_batch_size / 256,
-                                      betas=(0.9, 0.999), weight_decay=args.weight_decay)
-    else:
-        optimizer = torch.optim.AdamW(model.head.parameters(), lr=args.finetune_base_learning_rate * args.finetune_batch_size / 256,
-                                      betas=(0.9, 0.999), weight_decay=args.weight_decay)
-
-    criterion = torch.nn.MSELoss()
-
-    loss_fn = torch.nn.MSELoss()
-
-    lr_func = lambda epoch: min((epoch + 1) / (args.warmup_epoch + 1e-8), 0.5 * (math.cos(epoch / args.total_epoch * math.pi) + 1))
-    lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_func, verbose=True)
-
-    best_val_mse = 0
-    step_count = 0
-    optimizer.zero_grad()
-
     ours_result = {}
 
     for pred_len in pred_lens:
+        train_dataset = TimeSeriesDataset_Finetune(
+            original_dataset=torch.from_numpy(train_data).to(torch.float),
+            n_time_cols=n_time_cols,
+            seq_len=args.n_length,
+            pred_len=pred_len,
+            labelled_ratio=args.labelled_ratio,
+            mode='train'
+        )
+
+        # load val data
+        val_dataset = TimeSeriesDataset_Finetune(
+            original_dataset=torch.from_numpy(vali_data).to(torch.float),
+            n_time_cols=n_time_cols,
+            seq_len=args.n_length,
+            pred_len=pred_len,
+            labelled_ratio=args.labelled_ratio,
+            mode='val'
+        )
+
+        # load test data
+        test_dataset = TimeSeriesDataset_Finetune(
+            original_dataset=torch.from_numpy(test_data).to(torch.float),
+            n_time_cols=n_time_cols,
+            seq_len=args.n_length,
+            pred_len=pred_len,
+            labelled_ratio=args.labelled_ratio,
+            mode='test'
+        )
+
+        train_dataloader = torch.utils.data.DataLoader(
+            train_dataset,
+            args.finetune_batch_size,
+            shuffle=True,
+            drop_last=True
+        )
+
+        val_dataloader = torch.utils.data.DataLoader(
+            val_dataset,
+            args.finetune_batch_size,
+            shuffle=True,
+            drop_last=True
+        )
+
+        test_dataloader = torch.utils.data.DataLoader(
+            test_dataset,
+            args.finetune_batch_size,
+            shuffle=True,
+            drop_last=True
+        )
+
+        model_enc_dec = MAE_ViT(
+            sample_shape=[args.n_channel + n_time_cols, args.n_length],
+            patch_size=(args.n_channel + n_time_cols, args.patch_size),
+            mask_ratio=args.mask_ratio
+        )
+
+        global arch
+        if args.pretrain == True:
+            model_fp = os.path.join(args.model_path, "forecasting/{}/Pretrained_{}_{}".format(
+                args.mode, args.dataset, args.emb_dim), "Pretrained_{}_{}".format(args.dataset, args.emb_dim) + ".pkl")
+            model_enc_dec.load_state_dict(torch.load(model_fp, map_location=args.device.type))
+
+            arch = args.dataset
+            print("With pretrain.")
+        else:
+            arch = args.dataset + "_no_pre"
+            print("No pretrain.")
+
+        # model = ViT_Forecasting(model.encoder, n_covariate=args.n_channel, pred_len=args.pred_len).to(args.device)
+
+
+        model = ViT_Forecasting(model_enc_dec.encoder, n_covariate=args.n_channel, pred_len=pred_len).to(args.device)
+
+        Finetune_mode = "Full"  # or "Partial"
+        if Finetune_mode == "Full":
+            optimizer = torch.optim.AdamW(model.parameters(),
+                                          lr=args.finetune_base_learning_rate * args.finetune_batch_size / 256,
+                                          betas=(0.9, 0.999), weight_decay=args.weight_decay)
+        else:
+            optimizer = torch.optim.AdamW(model.head.parameters(),
+                                          lr=args.finetune_base_learning_rate * args.finetune_batch_size / 256,
+                                          betas=(0.9, 0.999), weight_decay=args.weight_decay)
+
+        criterion = torch.nn.MSELoss()
+
+        loss_fn = torch.nn.MSELoss()
+
+        lr_func = lambda epoch: min((epoch + 1) / (args.warmup_epoch + 1e-8),
+                                    0.5 * (math.cos(epoch / args.total_epoch * math.pi) + 1))
+        lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_func, verbose=True)
+
+        best_val_mse = 0
+        step_count = 0
+        optimizer.zero_grad()
+
         for epoch in range(args.finetune_epochs):
             print("--------start fine-tuning--------")
             model.train()
@@ -162,12 +185,12 @@ if __name__ == '__main__':
             mse_epoch = []
             mae_epoch = []
 
-            for sample_avg, sample_err, y in tqdm(iter(train_dataloader)):
+            for sample, y in tqdm(iter(train_dataloader)):
                 step_count += 1
-                sample_avg = sample_avg.to(args.device)
-                sample_err = sample_err.to(args.device)
+                sample = sample.to(args.device)
+
                 y = y.to(args.device)
-                logits = model(sample_avg, sample_err)
+                logits = model(sample)
 
                 y = y.squeeze(1)
                 y = y.reshape(y.shape[0], y.shape[1]*y.shape[2])
@@ -201,12 +224,11 @@ if __name__ == '__main__':
                 mse_epoch = []
                 mae_epoch = []
 
-                for sample_avg, sample_err, y in tqdm(iter(val_dataloader)):
+                for sample, y in tqdm(iter(val_dataloader)):
 
-                    sample_avg = sample_avg.to(args.device)
-                    sample_err = sample_err.to(args.device)
+                    sample = sample.to(args.device)
                     y = y.to(args.device)
-                    logits = model(sample_avg, sample_err)
+                    logits = model(sample)
 
 
                     y = y.squeeze(1)
@@ -253,11 +275,11 @@ if __name__ == '__main__':
                     mse_epoch_inv = []
                     mae_epoch_inv = []
 
-                    for sample_avg, sample_err, y in tqdm(iter(test_dataloader)):
-                        sample_avg = sample_avg.to(args.device)
-                        sample_err = sample_err.to(args.device)
+                    for sample_avg, y in tqdm(iter(test_dataloader)):
+                        sample = sample.to(args.device)
+
                         y = y.to(args.device)
-                        logits = model(sample_avg, sample_err)
+                        logits = model(sample)
 
                         y = y.squeeze(1)
                         y = y.reshape(y.shape[0], y.shape[1] * y.shape[2])
@@ -265,8 +287,8 @@ if __name__ == '__main__':
 
                         metrics = cal_metrics(logits.detach().cpu(), y.detach().cpu())
 
-                        logits = logits.reshape(logits.shape[0], args.pred_len, -1)
-                        y = y.reshape(y.shape[0], args.pred_len, -1)
+                        logits = logits.reshape(logits.shape[0], pred_len, -1)
+                        y = y.reshape(y.shape[0], pred_len, -1)
                         logits = logits.reshape(logits.shape[0]*logits.shape[1], -1)
                         y = y.reshape(y.shape[0]*y.shape[1], -1)
 

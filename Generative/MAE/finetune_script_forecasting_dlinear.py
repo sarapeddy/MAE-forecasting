@@ -40,9 +40,27 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description="MAE")
 
-    config = yaml_config_hook(f"config/ETTh1_config_MAE.yaml")
-    for k, v in config.items():
-        parser.add_argument(f"--{k}", default=v, type=type(v))
+    parser.add_argument('--dataset', default='ETTh1', type=str)
+    parser.add_argument('--mode', default='MAE', type=str)
+    parser.add_argument('--seed', default=42, type=int)
+    parser.add_argument('--batch_size', default=64, type=int)
+    parser.add_argument('--max_device_batch_size', default=64, type=int)
+    parser.add_argument('--base_learning_rate', default=1.5e-4, type=float)
+    parser.add_argument('--weight_decay', default=0.05, type=float)
+    parser.add_argument('--mask_ratio', default=0.75, type=float)
+    parser.add_argument('--total_epoch', default=200, type=int)
+    parser.add_argument('--warmup_epoch', default=5, type=int)
+    parser.add_argument('--emb_dim', default=64, type=int)
+    parser.add_argument('--model_path', default='save', type=str)
+    parser.add_argument('--n_channel', default=7, type=int)
+    parser.add_argument('--n_length', default=336, type=int)
+    parser.add_argument('--patch_size', default=16, type=int)
+    parser.add_argument('--labelled_ratio', default=0.1, type=float)
+    parser.add_argument('--finetune_batch_size', default=64, type=int)
+    parser.add_argument('--finetune_base_learning_rate', default=0.001, type=float)
+    parser.add_argument('--finetune_epochs', default=31, type=int)
+    parser.add_argument('--finetune_seed', default=42, type=int)
+    parser.add_argument('--pretrain', default=True, type=bool)
 
     args = parser.parse_args()
 
