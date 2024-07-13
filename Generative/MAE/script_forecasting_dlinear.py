@@ -35,7 +35,7 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description="MAE")
 
-    parser.add_argument('--dataset', default='ETTh1', type=str)
+    parser.add_argument('--dataset', default='exchange_rate', type=str)
     parser.add_argument('--mode', default='MAE', type=str)
     parser.add_argument('--seed', default=42, type=int)
     parser.add_argument('--batch_size', default=64, type=int)
@@ -47,7 +47,6 @@ if __name__ == '__main__':
     parser.add_argument('--warmup_epoch', default=5, type=int)
     parser.add_argument('--emb_dim', default=64, type=int)
     parser.add_argument('--model_path', default='save', type=str)
-    parser.add_argument('--n_channel', default=7, type=int)
     parser.add_argument('--n_length', default=336, type=int)
     parser.add_argument('--patch_size', default=16, type=int)
     parser.add_argument('--labelled_ratio', default=0.1, type=float)
@@ -93,8 +92,8 @@ if __name__ == '__main__':
     )
 
     model = MAE_ViT_Dlinear(
-        sample_shape=[args.n_channel + n_time_cols, args.n_length],
-        patch_size=(args.n_channel + n_time_cols, args.patch_size),
+        sample_shape=[train_data.shape[-1], args.n_length],
+        patch_size=(train_data.shape[-1], args.patch_size),
         mask_ratio=args.mask_ratio
     ).to(device)
 
