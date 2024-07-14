@@ -85,8 +85,8 @@ if __name__ == '__main__':
     )
 
     model = MAE_ViT(
-        sample_shape=[train_data.shape[-1], args.n_length],
-        patch_size=(train_data.shape[-1], args.patch_size),
+        sample_shape=[train_data.shape[0]*train_data.shape[2], args.n_length],
+        patch_size=(train_data.shape[0]*train_data.shape[2], args.patch_size),
         mask_ratio=args.mask_ratio
     ).to(device)
 

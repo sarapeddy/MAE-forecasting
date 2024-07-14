@@ -35,7 +35,7 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description="MAE")
 
-    parser.add_argument('--dataset', default='exchange_rate', type=str)
+    parser.add_argument('--dataset', default='WTH', type=str)
     parser.add_argument('--mode', default='MAE', type=str)
     parser.add_argument('--seed', default=42, type=int)
     parser.add_argument('--batch_size', default=64, type=int)
@@ -92,8 +92,8 @@ if __name__ == '__main__':
     )
 
     model = MAE_ViT_Dlinear(
-        sample_shape=[train_data.shape[-1], args.n_length],
-        patch_size=(train_data.shape[-1], args.patch_size),
+        sample_shape=[train_data.shape[0]*train_data.shape[2], args.n_length],
+        patch_size=(train_data.shape[0]*train_data.shape[2], args.patch_size),
         mask_ratio=args.mask_ratio
     ).to(device)
 
