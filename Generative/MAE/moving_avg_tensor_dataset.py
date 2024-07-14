@@ -35,7 +35,6 @@ class TimeSeriesDatasetWithMovingAvg(TensorDataset):
         x_avg = self.moving_avg(self.x_original)
         x_err = self.x_original - x_avg
         expanded_dataset = torch.cat([x_time, x_avg, x_err], dim=2)
-        expanded_dataset = expanded_dataset.squeeze(0)
         super(TimeSeriesDatasetWithMovingAvg, self).__init__(expanded_dataset)
 
     def __getitem__(self, index):
@@ -43,15 +42,21 @@ class TimeSeriesDatasetWithMovingAvg(TensorDataset):
         s_end = s_begin + self.seq_len
         r_begin = s_end
         r_end = r_begin + self.pred_len
-        data_x = self.tensors[0][s_begin:s_end]
-        data_y = self.x_original[r_begin:r_end]
-        time_data = data_x[:, :self.n_time_cols]
-        n_feature_cols = (data_x.shape[1] - self.n_time_cols)//2
-        avg_data = data_x[:, self.n_time_cols:self.n_time_cols+n_feature_cols]
-        err_data = data_x[:, -n_feature_cols:]
-        x_avg = torch.cat([time_data, avg_data], dim=1)
-        x_err = torch.cat([time_data, err_data], dim=1)
+        data_x = self.tensors[0][:, s_begin:s_end, :]
+        data_y = self.x_original[:, r_begin:r_end, :]
+        time_data = data_x[:, :, :self.n_time_cols]
+        n_feature_cols = (data_x.shape[2] - self.n_time_cols)//2
+        avg_data = data_x[:, :, self.n_time_cols:self.n_time_cols+n_feature_cols]
+        err_data = data_x[:, :, -n_feature_cols:]
+        x_avg = torch.cat([time_data, avg_data], dim=2)
+        x_err = torch.cat([time_data, err_data], dim=2)
+        x_avg = x_avg.swapaxes(0, 1)
+        x_err = x_err.swapaxes(0, 1)
+        data_y = data_y.swapaxes(0, 1)
+        x_avg = x_avg.reshape(x_avg.shape[0], x_avg.shape[1]*x_avg.shape[2])
+        x_err = x_err.reshape(x_err.shape[0], x_err.shape[1]*x_err.shape[2])
+        data_y = data_y.reshape(data_y.shape[0], data_y.shape[1]*data_y.shape[2])
         return x_avg, x_err, data_y
 
     def __len__(self):
-        return len(self.tensors[0]) - self.seq_len - self.pred_len + 1
+        return self.tensors[0].shape[1] - self.seq_len - self.pred_len + 1
