@@ -52,7 +52,8 @@ class MAE_Encoder_Dlinear(torch.nn.Module):
 
         self.patchify = torch.nn.Conv2d(1, emb_dim, patch_size, patch_size)  #inchannel=1
 
-        self.transformer = torch.nn.Sequential(*[Block(emb_dim, num_head) for _ in range(num_layer)])
+        self.transformer_avg = torch.nn.Sequential(*[Block(emb_dim, num_head) for _ in range(num_layer)])
+        self.transformer_err = torch.nn.Sequential(*[Block(emb_dim, num_head) for _ in range(num_layer)])
 
         self.layer_norm = torch.nn.LayerNorm(emb_dim)
 
@@ -79,8 +80,8 @@ class MAE_Encoder_Dlinear(torch.nn.Module):
         patches_err = torch.cat([self.cls_token.expand(-1, patches_err.shape[1], -1), patches_err], dim=0)
         patches_avg = rearrange(patches_avg, 't b c -> b t c')
         patches_err = rearrange(patches_err, 't b c -> b t c')
-        features_avg = self.layer_norm(self.transformer(patches_avg))
-        features_err = self.layer_norm(self.transformer(patches_err))
+        features_avg = self.layer_norm(self.transformer_avg(patches_avg))
+        features_err = self.layer_norm(self.transformer_err(patches_err))
         features_avg = rearrange(features_avg, 'b t c -> t b c')
         features_err = rearrange(features_err, 'b t c -> t b c')
 
@@ -159,14 +160,15 @@ class MAE_ViT_Dlinear(torch.nn.Module):
         return predicted_x, mask
 
 class ViT_Forecasting(torch.nn.Module):
-    def __init__(self, encoder : MAE_Encoder_Dlinear, n_covariate=7, pred_len=24) -> None:
+    def __init__(self, encoder : MAE_Encoder_Dlinear, n_covariate=7, pred_len=24, n_sample=1) -> None:
         super().__init__()
         self.cls_token = encoder.cls_token
         self.pos_embedding = encoder.pos_embedding
         self.patchify = encoder.patchify
-        self.transformer = encoder.transformer
+        self.transformer_avg = encoder.transformer_avg
+        self.transformer_err = encoder.transformer_err
         self.layer_norm = encoder.layer_norm
-        self.head = torch.nn.Linear(self.pos_embedding.shape[-1], n_covariate*pred_len)
+        self.head = torch.nn.Linear(self.pos_embedding.shape[-1], n_covariate*pred_len*n_sample)
 
     def forward(self, x_avg, x_err):
 
@@ -180,8 +182,8 @@ class ViT_Forecasting(torch.nn.Module):
         patches_err = torch.cat([self.cls_token.expand(-1, patches_err.shape[1], -1), patches_err], dim=0)
         patches_avg = rearrange(patches_avg, 't b c -> b t c')
         patches_err = rearrange(patches_err, 't b c -> b t c')
-        features_avg = self.layer_norm(self.transformer(patches_avg))
-        features_err = self.layer_norm(self.transformer(patches_err))
+        features_avg = self.layer_norm(self.transformer_avg(patches_avg))
+        features_err = self.layer_norm(self.transformer_err(patches_err))
         features = features_avg + features_err
         features = rearrange(features, 'b t c -> t b c')
         logits = self.head(features[0])
