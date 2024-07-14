@@ -154,7 +154,7 @@ if __name__ == '__main__':
         # model = ViT_Forecasting(model.encoder, n_covariate=args.n_channel, pred_len=args.pred_len).to(args.device)
 
 
-        model = ViT_Forecasting(model_enc_dec.encoder, n_covariate=args.n_channel, pred_len=pred_len).to(args.device)
+        model = ViT_Forecasting(model_enc_dec.encoder, n_covariate=train_data.shape[-1] - n_time_cols, pred_len=pred_len).to(args.device)
 
         Finetune_mode = "Full"  # or "Partial"
         if Finetune_mode == "Full":
