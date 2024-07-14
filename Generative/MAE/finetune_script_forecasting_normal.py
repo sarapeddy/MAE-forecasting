@@ -187,12 +187,12 @@ if __name__ == '__main__':
             for sample, y in tqdm(iter(train_dataloader)):
                 step_count += 1
                 sample = sample.to(args.device)
+                sample = sample.reshape(sample.shape[0], 1, sample.shape[1] * sample.shape[2], sample.shape[3])
 
                 y = y.to(args.device)
                 logits = model(sample)
 
-                y = y.squeeze(1)
-                y = y.reshape(y.shape[0], y.shape[1]*y.shape[2])
+                y = y.reshape(y.shape[0], y.shape[1]*y.shape[2]*y.shape[3])
                 loss = loss_fn(logits, y)
 
                 metrics = cal_metrics(logits.detach().cpu(), y.detach().cpu())
@@ -226,12 +226,12 @@ if __name__ == '__main__':
                 for sample, y in tqdm(iter(val_dataloader)):
 
                     sample = sample.to(args.device)
+                    sample = sample.reshape(sample.shape[0], 1, sample.shape[1] * sample.shape[2],
+                                                    sample.shape[3])
                     y = y.to(args.device)
                     logits = model(sample)
 
-
-                    y = y.squeeze(1)
-                    y = y.reshape(y.shape[0], y.shape[1] * y.shape[2])
+                    y = y.reshape(y.shape[0], y.shape[1] * y.shape[2]*y.shape[3])
                     loss = loss_fn(logits, y)
 
                     metrics = cal_metrics(logits.detach().cpu(), y.detach().cpu())
@@ -276,12 +276,12 @@ if __name__ == '__main__':
 
                     for sample_avg, y in tqdm(iter(test_dataloader)):
                         sample = sample.to(args.device)
+                        sample = sample.reshape(sample.shape[0], 1, sample.shape[1] * sample.shape[2], sample.shape[3])
 
                         y = y.to(args.device)
                         logits = model(sample)
 
-                        y = y.squeeze(1)
-                        y = y.reshape(y.shape[0], y.shape[1] * y.shape[2])
+                        y = y.reshape(y.shape[0], y.shape[1] * y.shape[2]*y.shape[3])
                         loss = loss_fn(logits, y)
 
                         metrics = cal_metrics(logits.detach().cpu(), y.detach().cpu())

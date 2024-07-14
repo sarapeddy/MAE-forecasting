@@ -27,11 +27,11 @@ class TimeSeriesDatasetWithMovingAvg_Finetune(TensorDataset):
         self.data_y = torch.swapaxes(self.data_y, 0,1)
         expanded_dataset = torch.cat([self.x_time, self.x_avg, self.x_err], dim=2)
 
-        # if self.mode == 'train':
-        #     n_samples = int(labelled_ratio * expanded_dataset.shape[0])
-        #     indices = torch.randperm(expanded_dataset.shape[0])[:n_samples]
-        #     expanded_dataset = expanded_dataset[indices]
-        #     self.data_y = self.data_y[indices]
+        if self.mode == 'train':
+            n_samples = int(labelled_ratio * expanded_dataset.shape[0])
+            indices = torch.randperm(expanded_dataset.shape[0])[:n_samples]
+            expanded_dataset = expanded_dataset[indices]
+            self.data_y = self.data_y[indices]
 
         super(TimeSeriesDatasetWithMovingAvg_Finetune, self).__init__(expanded_dataset)
 
@@ -68,11 +68,11 @@ class TimeSeriesDataset_Finetune(TensorDataset):
         self.original_dataset = torch.swapaxes(self.original_dataset, 0,1)
         self.data_y = torch.swapaxes(self.data_y, 0,1)
 
-        # if self.mode == 'train':
-        #     n_samples = int(labelled_ratio * expanded_dataset.shape[0])
-        #     indices = torch.randperm(expanded_dataset.shape[0])[:n_samples]
-        #     expanded_dataset = expanded_dataset[indices]
-        #     self.data_y = self.data_y[indices]
+        if self.mode == 'train':
+            n_samples = int(labelled_ratio * self.original_dataset.shape[0])
+            indices = torch.randperm(self.original_dataset.shape[0])[:n_samples]
+            self.original_dataset = self.original_dataset[indices]
+            self.data_y = self.data_y[indices]
 
         super(TimeSeriesDataset_Finetune, self).__init__(self.original_dataset)
 

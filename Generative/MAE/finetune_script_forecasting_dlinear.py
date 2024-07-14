@@ -40,7 +40,7 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description="MAE")
 
-    parser.add_argument('--dataset', default='ETTh1', type=str)
+    parser.add_argument('--dataset', default='electricity', type=str)
     parser.add_argument('--mode', default='MAE', type=str)
     parser.add_argument('--seed', default=42, type=int)
     parser.add_argument('--batch_size', default=64, type=int)
@@ -134,8 +134,8 @@ if __name__ == '__main__':
         )
 
         model_enc_dec = MAE_ViT_Dlinear(
-            sample_shape=[train_data.shape[-1], args.n_length],
-            patch_size=(train_data.shape[-1], args.patch_size),
+            sample_shape=[train_data.shape[0]*train_data.shape[2], args.n_length],
+            patch_size=(train_data.shape[0]*train_data.shape[2], args.patch_size),
             mask_ratio=args.mask_ratio
         )
 
@@ -151,10 +151,10 @@ if __name__ == '__main__':
             arch = args.dataset + "_no_pre"
             print("No pretrain.")
 
-        # model = ViT_Forecasting(model.encoder, n_covariate=args.n_channel, pred_len=args.pred_len).to(args.device)
+        model = ViT_Forecasting(model.encoder, n_covariate=args.n_channel, pred_len=args.pred_len).to(args.device)
 
 
-        model = ViT_Forecasting(model_enc_dec.encoder, n_covariate=train_data.shape[-1] - n_time_cols, pred_len=pred_len).to(args.device)
+        model = ViT_Forecasting(model_enc_dec.encoder, n_covariate=train_data.shape[-1] - n_time_cols, pred_len=pred_len, n_sample=train_data.shape[0]).to(args.device)
 
         Finetune_mode = "Full"  # or "Partial"
         if Finetune_mode == "Full":
@@ -189,11 +189,12 @@ if __name__ == '__main__':
                 step_count += 1
                 sample_avg = sample_avg.to(args.device)
                 sample_err = sample_err.to(args.device)
+                sample_avg = sample_avg.reshape(sample_avg.shape[0], 1, sample_avg.shape[1]*sample_avg.shape[2], sample_avg.shape[3])
+                sample_err = sample_err.reshape(sample_err.shape[0], 1, sample_err.shape[1]*sample_err.shape[2], sample_avg.shape[3])
                 y = y.to(args.device)
                 logits = model(sample_avg, sample_err)
 
-                y = y.squeeze(1)
-                y = y.reshape(y.shape[0], y.shape[1]*y.shape[2])
+                y = y.reshape(y.shape[0], y.shape[1]*y.shape[2]*y.shape[3])
                 loss = loss_fn(logits, y)
 
                 metrics = cal_metrics(logits.detach().cpu(), y.detach().cpu())
@@ -228,12 +229,14 @@ if __name__ == '__main__':
 
                     sample_avg = sample_avg.to(args.device)
                     sample_err = sample_err.to(args.device)
+                    sample_avg = sample_avg.reshape(sample_avg.shape[0], 1, sample_avg.shape[1] * sample_avg.shape[2],
+                                                    sample_avg.shape[3])
+                    sample_err = sample_err.reshape(sample_err.shape[0], 1, sample_err.shape[1] * sample_err.shape[2],
+                                                    sample_avg.shape[3])
                     y = y.to(args.device)
                     logits = model(sample_avg, sample_err)
 
-
-                    y = y.squeeze(1)
-                    y = y.reshape(y.shape[0], y.shape[1] * y.shape[2])
+                    y = y.reshape(y.shape[0], y.shape[1] * y.shape[2] * y.shape[3])
                     loss = loss_fn(logits, y)
 
                     metrics = cal_metrics(logits.detach().cpu(), y.detach().cpu())
@@ -279,11 +282,14 @@ if __name__ == '__main__':
                     for sample_avg, sample_err, y in tqdm(iter(test_dataloader)):
                         sample_avg = sample_avg.to(args.device)
                         sample_err = sample_err.to(args.device)
+                        sample_avg = sample_avg.reshape(sample_avg.shape[0], 1,
+                                                        sample_avg.shape[1] * sample_avg.shape[2], sample_avg.shape[3])
+                        sample_err = sample_err.reshape(sample_err.shape[0], 1,
+                                                        sample_err.shape[1] * sample_err.shape[2], sample_avg.shape[3])
                         y = y.to(args.device)
                         logits = model(sample_avg, sample_err)
 
-                        y = y.squeeze(1)
-                        y = y.reshape(y.shape[0], y.shape[1] * y.shape[2])
+                        y = y.reshape(y.shape[0], y.shape[1] * y.shape[2] * y.shape[3])
                         loss = loss_fn(logits, y)
 
                         metrics = cal_metrics(logits.detach().cpu(), y.detach().cpu())
