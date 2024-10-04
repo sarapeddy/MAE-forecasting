@@ -1,5 +1,4 @@
 import torch
-import timm
 import numpy as np
 
 from einops import repeat, rearrange
@@ -74,8 +73,6 @@ class MAE_Encoder(torch.nn.Module):
         patches = rearrange(patches, 't b c -> b t c')
         features = self.layer_norm(self.transformer(patches))
         features = rearrange(features, 'b t c -> t b c')
-
-        # è qui che bisogna sommare la rappr del trend e quella dell'errore
 
         return features, backward_indexes
 
@@ -171,6 +168,27 @@ class ViT_Classifier(torch.nn.Module):
         logits = self.head(features[0])
         return logits
 
+class ViT_Forecasting(torch.nn.Module):
+    def __init__(self, encoder : MAE_Encoder, n_covariate=7, pred_len=24, n_sample=1) -> None:
+        super().__init__()
+        self.cls_token = encoder.cls_token
+        self.pos_embedding = encoder.pos_embedding
+        self.patchify = encoder.patchify
+        self.transformer = encoder.transformer
+        self.layer_norm = encoder.layer_norm
+        self.head = torch.nn.Linear(self.pos_embedding.shape[-1], n_covariate*pred_len*n_sample)
+
+    def forward(self, x):
+
+        patches = self.patchify(x)
+        patches = rearrange(patches, 'b c h w -> (h w) b c')
+        patches = patches + self.pos_embedding
+        patches = torch.cat([self.cls_token.expand(-1, patches.shape[1], -1), patches], dim=0)
+        patches = rearrange(patches, 't b c -> b t c')
+        features = self.layer_norm(self.transformer(patches))
+        features = rearrange(features, 'b t c -> t b c')
+        logits = self.head(features[0])
+        return logits
 
 if __name__ == '__main__':
     shuffle = PatchShuffle(0.75)

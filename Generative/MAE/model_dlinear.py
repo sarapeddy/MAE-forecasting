@@ -35,6 +35,7 @@ class PatchShuffle(torch.nn.Module):
 
         return patches, forward_indexes, backward_indexes, remain_T
 
+
 class MAE_Encoder_Dlinear(torch.nn.Module):
     def __init__(self,
                  sample_size=[2,240],
@@ -42,7 +43,7 @@ class MAE_Encoder_Dlinear(torch.nn.Module):
                  emb_dim=192,  #192
                  num_layer=2, #12
                  num_head=3,
-                 mask_ratio=0.75,
+                 mask_ratio=0.75
                  ) -> None:
         super().__init__()
 
@@ -52,8 +53,7 @@ class MAE_Encoder_Dlinear(torch.nn.Module):
 
         self.patchify = torch.nn.Conv2d(1, emb_dim, patch_size, patch_size)  #inchannel=1
 
-        self.transformer_avg = torch.nn.Sequential(*[Block(emb_dim, num_head) for _ in range(num_layer)])
-        self.transformer_err = torch.nn.Sequential(*[Block(emb_dim, num_head) for _ in range(num_layer)])
+        self.transformer = torch.nn.Sequential(*[Block(emb_dim, num_head) for _ in range(num_layer)])
 
         self.layer_norm = torch.nn.LayerNorm(emb_dim)
 
@@ -63,31 +63,24 @@ class MAE_Encoder_Dlinear(torch.nn.Module):
         trunc_normal_(self.cls_token, std=.02)
         trunc_normal_(self.pos_embedding, std=.02)
 
-    def forward(self, x_avg, x_err):
+    def forward(self, x, backward_indexes=None, forward_indexes=None, remain_T=None):
 
-        patches_avg = self.patchify(x_avg)
-        patches_err = self.patchify(x_err)
-        patches_avg = rearrange(patches_avg, 'b c h w -> (h w) b c')
-        patches_err = rearrange(patches_err, 'b c h w -> (h w) b c')
-        patches_avg = patches_avg + self.pos_embedding
-        patches_err = patches_err + self.pos_embedding
+        patches = self.patchify(x)
+        patches = rearrange(patches, 'b c h w -> (h w) b c')
+        patches = patches + self.pos_embedding
 
-        patches_avg, forward_indexes, backward_indexes, remain_T = self.shuffle(patches_avg)
-        patches_err = take_indexes(patches_err, forward_indexes)
-        patches_err = patches_err[:remain_T]
+        if backward_indexes is None and remain_T is None and forward_indexes is None:
+            patches, forward_indexes, backward_indexes, remain_T = self.shuffle(patches)
+        else:
+            patches = take_indexes(patches, forward_indexes)
+            patches = patches[:remain_T]
 
-        patches_avg = torch.cat([self.cls_token.expand(-1, patches_avg.shape[1], -1), patches_avg], dim=0)
-        patches_err = torch.cat([self.cls_token.expand(-1, patches_err.shape[1], -1), patches_err], dim=0)
-        patches_avg = rearrange(patches_avg, 't b c -> b t c')
-        patches_err = rearrange(patches_err, 't b c -> b t c')
-        features_avg = self.layer_norm(self.transformer_avg(patches_avg))
-        features_err = self.layer_norm(self.transformer_err(patches_err))
-        features_avg = rearrange(features_avg, 'b t c -> t b c')
-        features_err = rearrange(features_err, 'b t c -> t b c')
+        patches = torch.cat([self.cls_token.expand(-1, patches.shape[1], -1), patches], dim=0)
+        patches = rearrange(patches, 't b c -> b t c')
+        features = self.layer_norm(self.transformer(patches))
+        features = rearrange(features, 'b t c -> t b c')
 
-        features = features_avg + features_err
-
-        return features, backward_indexes
+        return features, backward_indexes, forward_indexes, remain_T
 
 class MAE_Decoder_Dlinear(torch.nn.Module):
     def __init__(self,
@@ -151,39 +144,47 @@ class MAE_ViT_Dlinear(torch.nn.Module):
                  ) -> None:
         super().__init__()
 
-        self.encoder = MAE_Encoder_Dlinear(sample_shape, patch_size, emb_dim, encoder_layer, encoder_head, mask_ratio)
+        self.encoder_avg = MAE_Encoder_Dlinear(sample_shape, patch_size, emb_dim, encoder_layer, encoder_head, mask_ratio)
+        self.encoder_err = MAE_Encoder_Dlinear(sample_shape, patch_size, emb_dim, encoder_layer, encoder_head, mask_ratio)
         self.decoder = MAE_Decoder_Dlinear(sample_shape, patch_size, emb_dim, decoder_layer, decoder_head)
 
     def forward(self, x_avg, x_err):
-        features, backward_indexes = self.encoder(x_avg, x_err)
+        features_avg, backward_indexes, forward_indexes, remain_T = self.encoder_avg(x_avg)
+        features_err, backward_indexes, forward_indexes, remain_T = self.encoder_err(x_err, backward_indexes, forward_indexes, remain_T)
+        features = features_avg + features_err
         predicted_x, mask = self.decoder(features, backward_indexes)
         return predicted_x, mask
 
+
 class ViT_Forecasting(torch.nn.Module):
-    def __init__(self, encoder : MAE_Encoder_Dlinear, n_covariate=7, pred_len=24, n_sample=1) -> None:
+    def __init__(self, encoder_avg : MAE_Encoder_Dlinear, encoder_err: MAE_Encoder_Dlinear, n_covariate=7, pred_len=24, n_sample=1) -> None:
         super().__init__()
-        self.cls_token = encoder.cls_token
-        self.pos_embedding = encoder.pos_embedding
-        self.patchify = encoder.patchify
-        self.transformer_avg = encoder.transformer_avg
-        self.transformer_err = encoder.transformer_err
-        self.layer_norm = encoder.layer_norm
-        self.head = torch.nn.Linear(self.pos_embedding.shape[-1], n_covariate*pred_len*n_sample)
+        self.cls_token_avg = encoder_avg.cls_token
+        self.cls_token_err = encoder_err.cls_token
+        self.pos_embedding_avg = encoder_avg.pos_embedding
+        self.pos_embedding_err = encoder_err.pos_embedding
+        self.patchify_avg = encoder_avg.patchify
+        self.patchify_err = encoder_err.patchify
+        self.transformer_avg = encoder_avg.transformer
+        self.transformer_err = encoder_err.transformer
+        self.layer_norm_avg = encoder_avg.layer_norm
+        self.layer_norm_err = encoder_err.layer_norm
+        self.head = torch.nn.Linear(self.pos_embedding_avg.shape[-1], n_covariate*pred_len*n_sample)
 
     def forward(self, x_avg, x_err):
 
-        patches_avg = self.patchify(x_avg)
-        patches_err = self.patchify(x_err)
+        patches_avg = self.patchify_avg(x_avg)
+        patches_err = self.patchify_err(x_err)
         patches_avg = rearrange(patches_avg, 'b c h w -> (h w) b c')
         patches_err = rearrange(patches_err, 'b c h w -> (h w) b c')
-        patches_avg = patches_avg + self.pos_embedding
-        patches_err = patches_err + self.pos_embedding
-        patches_avg = torch.cat([self.cls_token.expand(-1, patches_avg.shape[1], -1), patches_err], dim=0)
-        patches_err = torch.cat([self.cls_token.expand(-1, patches_err.shape[1], -1), patches_err], dim=0)
+        patches_avg = patches_avg + self.pos_embedding_avg
+        patches_err = patches_err + self.pos_embedding_err
+        patches_avg = torch.cat([self.cls_token_avg.expand(-1, patches_avg.shape[1], -1), patches_err], dim=0)
+        patches_err = torch.cat([self.cls_token_err.expand(-1, patches_err.shape[1], -1), patches_err], dim=0)
         patches_avg = rearrange(patches_avg, 't b c -> b t c')
         patches_err = rearrange(patches_err, 't b c -> b t c')
-        features_avg = self.layer_norm(self.transformer_avg(patches_avg))
-        features_err = self.layer_norm(self.transformer_err(patches_err))
+        features_avg = self.layer_norm_avg(self.transformer_avg(patches_avg))
+        features_err = self.layer_norm_err(self.transformer_err(patches_err))
         features = features_avg + features_err
         features = rearrange(features, 'b t c -> t b c')
         logits = self.head(features[0])
