@@ -17,7 +17,7 @@ def _get_time_features(dt):
 
 
 def load_forecast_csv(name, univar=False):
-    data = pd.read_csv(f'../Datasets/{name}.csv', index_col='date', parse_dates=True)
+    data = pd.read_csv(f'./Datasets/{name}.csv', index_col='date', parse_dates=True)
 
     dt_embed = _get_time_features(data.index)
 
