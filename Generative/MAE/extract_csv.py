@@ -15,7 +15,7 @@ def find_eval_res_files(start_path):
                 matches.append(os.path.join(root, file))
     return matches
 
-def extract_data_from_file(file_path, type):
+def extract_data_from_file(file_path, data_type):
     """
     Extracts the accuracy and loss from the eval_res.json file.
     """
@@ -23,32 +23,31 @@ def extract_data_from_file(file_path, type):
         with open(file_path, 'r') as file:
             data = json.load(file)
 
-            # DA CAMBIARE SE SI CAMBIA COME VENGONO SALVATI I RISULTATI
             if 'forecasting' in args.directory:
                 data = data['ours']
-            #     # match = re.search(r'([^/]+)__forecast_multivar_', file_path).group(1)
-            # elif 'classification' in args.directory:
-            #     match = re.search(r'([^/]+)__classification_', file_path).group(1)
-            # elif 'anomaly_detection' in args.directory:
-            #     match = re.search(r'([^/]+)__anomaly_detection_', file_path).group(1)
-            # else:
-            #     raise ValueError(f"Unknown task type")
+                match = re.search(r'([^/]+)__forecast_multivar_', file_path).group(1)
+            elif 'classification' in args.directory:
+                match = re.search(r'([^/]+)__classification_', file_path).group(1)
+            elif 'anomaly_detection' in args.directory:
+                match = re.search(r'([^/]+)__anomaly_detection_', file_path).group(1)
+            else:
+                raise ValueError(f"Unknown task type")
 
             splits = file_path.split('/')
             model_name = splits[4]
-            extract_data = {model_name:{splits[5]: {}}}
+            extract_data = {model_name:{match: {}}}
             if 'forecasting' in args.directory:
                 for key in data.keys():
-                    extract_data[model_name][splits[5]][key] ={
-                        'MAE': round(data[key][type]['MAE'], 4),
-                        'MSE': round(data[key][type]['MSE'], 4)
+                    extract_data[model_name][match][key] ={
+                        'MAE': round(data[key][data_type]['MAE'], 4),
+                        'MSE': round(data[key][data_type]['MSE'], 4)
                     }
             elif 'classification' in args.directory:
-                extract_data[model_name][splits[5]] ={
+                extract_data[model_name][match] ={
                     'acc': round(data['acc'], 4),
                 }
             elif 'anomaly_detection' in args.directory:
-                extract_data[model_name][splits[5]] ={
+                extract_data[model_name][match] ={
                     'f1': round(data['f1'], 4),
                     'precision': round(data['precision'], 4),
                     'recall': round(data['recall'], 4)
