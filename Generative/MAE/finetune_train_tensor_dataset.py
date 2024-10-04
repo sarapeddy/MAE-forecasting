@@ -6,7 +6,7 @@ from moving_avg_tensor_dataset import MovingAvg
 
 class TimeSeriesDatasetWithMovingAvg_Finetune(TensorDataset):
 
-    def __init__(self, original_dataset: Tensor, n_time_cols,  kernel_size=9, seq_len=336, pred_len=24, labelled_ratio=0.1, mode='train'):
+    def __init__(self, original_dataset: Tensor, n_time_cols,  kernel_size=9, seq_len=336, pred_len=24, labelled_ratio=0.1, mode='train', dataset_name='ETTh1'):
         self.n_time_cols = n_time_cols
         self.mode = mode
         self.seq_len = seq_len
@@ -27,7 +27,7 @@ class TimeSeriesDatasetWithMovingAvg_Finetune(TensorDataset):
         self.data_y = torch.swapaxes(self.data_y, 0,1)
         expanded_dataset = torch.cat([self.x_time, self.x_avg, self.x_err], dim=2)
 
-        if self.mode == 'train':
+        if self.mode == 'train' and dataset_name!='national_illness':
             n_samples = int(labelled_ratio * expanded_dataset.shape[0])
             indices = torch.randperm(expanded_dataset.shape[0])[:n_samples]
             expanded_dataset = expanded_dataset[indices]
@@ -54,7 +54,7 @@ class TimeSeriesDatasetWithMovingAvg_Finetune(TensorDataset):
 
 
 class TimeSeriesDataset_Finetune(TensorDataset):
-    def __init__(self, original_dataset: Tensor, n_time_cols,  kernel_size=9, seq_len=336, pred_len=24, labelled_ratio=0.1, mode='train'):
+    def __init__(self, original_dataset: Tensor, n_time_cols,  kernel_size=9, seq_len=336, pred_len=24, labelled_ratio=0.1, mode='train', dataset_name='ETTh1'):
         self.n_time_cols = n_time_cols
         self.mode = mode
         self.seq_len = seq_len
@@ -68,7 +68,7 @@ class TimeSeriesDataset_Finetune(TensorDataset):
         self.original_dataset = torch.swapaxes(self.original_dataset, 0,1)
         self.data_y = torch.swapaxes(self.data_y, 0,1)
 
-        if self.mode == 'train':
+        if self.mode == 'train' and dataset_name!='national_illness':
             n_samples = int(labelled_ratio * self.original_dataset.shape[0])
             indices = torch.randperm(self.original_dataset.shape[0])[:n_samples]
             self.original_dataset = self.original_dataset[indices]
