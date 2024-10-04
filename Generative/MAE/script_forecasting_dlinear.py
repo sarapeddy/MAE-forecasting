@@ -6,9 +6,6 @@ from torch.utils.data import TensorDataset
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 from model import *
-import torch.utils.data as Data
-from build_dataset import CustomTensorDataset
-from utils import yaml_config_hook
 from datautils import load_forecast_csv
 from save_model import save_model
 from moving_avg_tensor_dataset import TimeSeriesDatasetWithMovingAvg
@@ -35,8 +32,8 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description="MAE")
 
-    parser.add_argument('--dataset', default='WTH', type=str)
-    parser.add_argument('--mode', default='MAE', type=str)
+    parser.add_argument('--dataset', default='ETTh1', type=str)
+    parser.add_argument('--mode', default='dlinear', type=str)
     parser.add_argument('--seed', default=42, type=int)
     parser.add_argument('--batch_size', default=64, type=int)
     parser.add_argument('--max_device_batch_size', default=64, type=int)
@@ -46,7 +43,7 @@ if __name__ == '__main__':
     parser.add_argument('--total_epoch', default=200, type=int)
     parser.add_argument('--warmup_epoch', default=5, type=int)
     parser.add_argument('--emb_dim', default=64, type=int)
-    parser.add_argument('--model_path', default='save', type=str)
+    parser.add_argument('--model_path', default='training', type=str)
     parser.add_argument('--n_length', default=336, type=int)
     parser.add_argument('--patch_size', default=16, type=int)
     parser.add_argument('--labelled_ratio', default=0.1, type=float)
@@ -81,70 +78,69 @@ if __name__ == '__main__':
     vali_data = data[:, valid_slice]
     test_data = data[:, test_slice]
 
+    for pred_len in pred_lens:
+        train_dataset = TimeSeriesDatasetWithMovingAvg(torch.from_numpy(train_data).to(torch.float), n_time_cols=n_time_cols, seq_len=args.n_length, pred_len=pred_len)
 
-    train_dataset = TimeSeriesDatasetWithMovingAvg(torch.from_numpy(train_data).to(torch.float), n_time_cols=n_time_cols, seq_len=args.n_length, pred_len=pred_lens[0])
+        train_loader = torch.utils.data.DataLoader(
+            train_dataset,
+            batch_size=load_batch_size,
+            shuffle=True,
+            # collate_fn=custom_collate_fn
+        )
 
-    train_loader = torch.utils.data.DataLoader(
-        train_dataset,
-        batch_size=load_batch_size,
-        shuffle=True,
-        # collate_fn=custom_collate_fn
-    )
+        model = MAE_ViT_Dlinear(
+            sample_shape=[train_data.shape[0]*train_data.shape[2], args.n_length],
+            patch_size=(train_data.shape[0]*train_data.shape[2], args.patch_size),
+            mask_ratio=args.mask_ratio
+        ).to(device)
 
-    model = MAE_ViT_Dlinear(
-        sample_shape=[train_data.shape[0]*train_data.shape[2], args.n_length],
-        patch_size=(train_data.shape[0]*train_data.shape[2], args.patch_size),
-        mask_ratio=args.mask_ratio
-    ).to(device)
+        optim = torch.optim.AdamW(
+            model.parameters(),
+            lr=args.base_learning_rate * args.batch_size / 256,
+            betas=(0.9, 0.95),
+            weight_decay=args.weight_decay
+        )
 
-    optim = torch.optim.AdamW(
-        model.parameters(),
-        lr=args.base_learning_rate * args.batch_size / 256,
-        betas=(0.9, 0.95),
-        weight_decay=args.weight_decay
-    )
+        lr_func = lambda epoch: min((epoch + 1) / (args.warmup_epoch + 1e-8),
+                                    0.5 * (math.cos(epoch / args.total_epoch * math.pi) + 1))
+        lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optim, lr_lambda=lr_func, verbose=True)
 
-    lr_func = lambda epoch: min((epoch + 1) / (args.warmup_epoch + 1e-8),
-                                0.5 * (math.cos(epoch / args.total_epoch * math.pi) + 1))
-    lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optim, lr_lambda=lr_func, verbose=True)
+        step_count = 0
+        optim.zero_grad()
+        min_loss = 100
+        for e in range(args.total_epoch):
+            model.train()
+            print('===== start training ======')
+            losses = []
+            # for sample, label in tqdm(iter(train_loader)):
+            for sample_avg, sample_err, _ in tqdm(iter(train_loader)):
+                step_count += 1
 
-    step_count = 0
-    optim.zero_grad()
-    min_loss = 100
-    for e in range(args.total_epoch):
-        model.train()
-        print('===== start training ======')
-        losses = []
-        # for sample, label in tqdm(iter(train_loader)):
-        for sample_avg, sample_err, _ in tqdm(iter(train_loader)):
-            step_count += 1
+                sample_avg = sample_avg.swapaxes(1, 2)
+                sample_avg = np.expand_dims(sample_avg, axis=1)
 
-            sample_avg = sample_avg.swapaxes(1, 2)
-            sample_avg = np.expand_dims(sample_avg, axis=1)
+                sample_err = sample_err.swapaxes(1, 2)
+                sample_err = np.expand_dims(sample_err, axis=1)
 
-            sample_err = sample_err.swapaxes(1, 2)
-            sample_err = np.expand_dims(sample_err, axis=1)
-
-            sample_avg = torch.tensor(sample_avg, dtype=torch.float32).to(device)
-            sample_err = torch.tensor(sample_err, dtype=torch.float32).to(device)
+                sample_avg = torch.tensor(sample_avg, dtype=torch.float32).to(device)
+                sample_err = torch.tensor(sample_err, dtype=torch.float32).to(device)
 
 
+                predicted_sample, mask = model(sample_avg, sample_err)
+                loss = torch.mean((predicted_sample - (sample_avg + sample_err)) ** 2 * mask) / args.mask_ratio
+                loss.backward()
+                if step_count % steps_per_update == 0:
+                    optim.step()
+                    optim.zero_grad()
+                losses.append(loss.item())
+            lr_scheduler.step()
+            avg_loss = sum(losses) / len(losses)
+            print(f'In epoch {e}, average traning loss is {avg_loss}.')
 
-            predicted_sample, mask = model(sample_avg, sample_err)
-            loss = torch.mean((predicted_sample - (sample_avg + sample_err)) ** 2 * mask) / args.mask_ratio
-            loss.backward()
-            if step_count % steps_per_update == 0:
-                optim.step()
-                optim.zero_grad()
-            losses.append(loss.item())
-        lr_scheduler.step()
-        avg_loss = sum(losses) / len(losses)
-        print(f'In epoch {e}, average traning loss is {avg_loss}.')
-
-        ''' save pre-trained model '''
-        if avg_loss < min_loss:
-            min_loss = avg_loss
-            save_model(args, model, args.mode, optim)
-            print("Model update with loss {}.".format(min_loss))
+            ''' save pre-trained model '''
+            if avg_loss < min_loss:
+                min_loss = avg_loss
+                save_model(args, model, args.mode, pred_len, optim)
+                print("Model update with loss {}.".format(min_loss))
 
     print("Finished")
