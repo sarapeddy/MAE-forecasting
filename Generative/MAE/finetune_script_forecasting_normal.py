@@ -39,7 +39,7 @@ def cal_metrics(pred, target):
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description="MAE")
-    parser.add_argument('--dataset', default='ETTh1', type=str)
+    parser.add_argument('--dataset', default='electricity', type=str)
     parser.add_argument('--mode', default='MAE', type=str)
     parser.add_argument('--seed', default=42, type=int)
     parser.add_argument('--batch_size', default=64, type=int)
@@ -50,7 +50,7 @@ if __name__ == '__main__':
     parser.add_argument('--total_epoch', default=200, type=int)
     parser.add_argument('--warmup_epoch', default=5, type=int)
     parser.add_argument('--emb_dim', default=64, type=int)
-    parser.add_argument('--model_path', default='save', type=str)
+    parser.add_argument('--model_path', default='training', type=str)
     parser.add_argument('--n_length', default=336, type=int)
     parser.add_argument('--patch_size', default=16, type=int)
     parser.add_argument('--labelled_ratio', default=0.1, type=float)
@@ -59,6 +59,8 @@ if __name__ == '__main__':
     parser.add_argument('--finetune_epochs', default=31, type=int)
     parser.add_argument('--finetune_seed', default=42, type=int)
     parser.add_argument('--pretrain', default=True, type=bool)
+    parser.add_argument('--run_name', default='forecast_multivar',
+                        help='The folder name used to save model, output and evaluation metrics. This can be set to any word')
 
     args = parser.parse_args()
 
@@ -80,6 +82,9 @@ if __name__ == '__main__':
     test_data = data[:, test_slice]
 
     ours_result = {}
+    loss_train_avg = {}
+    loss_val_avg = {}
+    loss_test_avg = {}
 
     for pred_len in pred_lens:
         train_dataset = TimeSeriesDataset_Finetune(
@@ -88,7 +93,8 @@ if __name__ == '__main__':
             seq_len=args.n_length,
             pred_len=pred_len,
             labelled_ratio=args.labelled_ratio,
-            mode='train'
+            mode='train',
+            dataset_name=dataset_name
         )
 
         # load val data
@@ -98,7 +104,8 @@ if __name__ == '__main__':
             seq_len=args.n_length,
             pred_len=pred_len,
             labelled_ratio=args.labelled_ratio,
-            mode='val'
+            mode='val',
+            dataset_name=dataset_name
         )
 
         # load test data
@@ -108,7 +115,8 @@ if __name__ == '__main__':
             seq_len=args.n_length,
             pred_len=pred_len,
             labelled_ratio=args.labelled_ratio,
-            mode='test'
+            mode='test',
+            dataset_name=dataset_name
         )
 
         train_dataloader = torch.utils.data.DataLoader(
@@ -133,15 +141,16 @@ if __name__ == '__main__':
         )
 
         model_enc_dec = MAE_ViT(
-            sample_shape=[train_data.shape[-1], args.n_length],
-            patch_size=(train_data.shape[-1], args.patch_size),
+            sample_shape=[train_data.shape[0]*train_data.shape[2], args.n_length],
+            patch_size=(train_data.shape[0]*train_data.shape[2], args.patch_size),
             mask_ratio=args.mask_ratio
         )
 
         global arch
         if args.pretrain == True:
-            model_fp = os.path.join(args.model_path, "forecasting/{}/Pretrained_{}_{}".format(
-                args.mode, args.dataset, args.emb_dim), "Pretrained_{}_{}".format(args.dataset, args.emb_dim) + ".pkl")
+            model_fp = os.path.join(args.model_path, "forecasting/B{}_E{}/{}/Pretrained_{}_{}_{}".format(
+                args.batch_size, args.emb_dim, args.mode, args.dataset, args.emb_dim, pred_len),
+                                    "Pretrained_{}_{}_{}".format(args.dataset, args.emb_dim, pred_len) + ".pkl")
             model_enc_dec.load_state_dict(torch.load(model_fp, map_location=args.device.type))
 
             arch = args.dataset
@@ -153,7 +162,7 @@ if __name__ == '__main__':
         # model = ViT_Forecasting(model.encoder, n_covariate=args.n_channel, pred_len=args.pred_len).to(args.device)
 
 
-        model = ViT_Forecasting(model_enc_dec.encoder, n_covariate=train_data.shape[-1] - n_time_cols, pred_len=pred_len).to(args.device)
+        model = ViT_Forecasting(model_enc_dec.encoder, n_covariate=train_data.shape[-1] - n_time_cols, pred_len=pred_len, n_sample=train_data.shape[0]).to(args.device)
 
         Finetune_mode = "Full"  # or "Partial"
         if Finetune_mode == "Full":
@@ -211,6 +220,11 @@ if __name__ == '__main__':
             avg_mse = sum(mse_epoch) / len(mse_epoch)
             avg_mae = sum(mae_epoch) / len(mae_epoch)
 
+            if pred_len in loss_train_avg:
+                loss_train_avg[pred_len].append(avg_train_loss)
+            else:
+                loss_train_avg[pred_len]=[avg_train_loss]
+
             if epoch % 10 == 0:
                 print("Epoch [{}/{}]\n average Finetune Loss: {}\n MAE: {}\n MSE: {}\n".format(epoch, args.finetune_epochs, avg_train_loss, avg_mae, avg_mse))
 
@@ -243,6 +257,10 @@ if __name__ == '__main__':
                 avg_val_loss = get_avg(loss_epoch)
                 avg_val_mae = get_avg(mae_epoch)
                 avg_val_mse = get_avg(mse_epoch)
+                if pred_len in loss_val_avg:
+                    loss_val_avg[pred_len].append(avg_val_loss)
+                else:
+                    loss_val_avg[pred_len] = [avg_val_loss]
 
 
                 if epoch % 10 == 0:
@@ -262,53 +280,58 @@ if __name__ == '__main__':
                 torch.save(model, FT_model_path)
 
             # if epoch % 10 == 0:
-            if avg_val_mse == best_val_mse:
-                print("TEST-epoch {}--------start testing-------- ".format(epoch))
 
-                model.eval()
-                with torch.no_grad():
-                    loss_epoch = []
-                    mse_epoch = []
-                    mae_epoch = []
+            print("TEST-epoch {}--------start testing-------- ".format(epoch))
 
-                    mse_epoch_inv = []
-                    mae_epoch_inv = []
+            model.eval()
+            with torch.no_grad():
+                loss_epoch = []
+                mse_epoch = []
+                mae_epoch = []
 
-                    for sample_avg, y in tqdm(iter(test_dataloader)):
-                        sample = sample.to(args.device)
-                        sample = sample.reshape(sample.shape[0], 1, sample.shape[1] * sample.shape[2], sample.shape[3])
+                mse_epoch_inv = []
+                mae_epoch_inv = []
 
-                        y = y.to(args.device)
-                        logits = model(sample)
+                for sample_avg, y in tqdm(iter(test_dataloader)):
+                    sample = sample.to(args.device)
+                    sample = sample.reshape(sample.shape[0], 1, sample.shape[1] * sample.shape[2], sample.shape[3])
 
-                        y = y.reshape(y.shape[0], y.shape[1] * y.shape[2]*y.shape[3])
-                        loss = loss_fn(logits, y)
+                    y = y.to(args.device)
+                    logits = model(sample)
 
-                        metrics = cal_metrics(logits.detach().cpu(), y.detach().cpu())
+                    y = y.reshape(y.shape[0], y.shape[1] * y.shape[2]*y.shape[3])
+                    loss = loss_fn(logits, y)
 
-                        logits = logits.reshape(logits.shape[0], pred_len, -1)
-                        y = y.reshape(y.shape[0], pred_len, -1)
-                        logits = logits.reshape(logits.shape[0]*logits.shape[1], -1)
-                        y = y.reshape(y.shape[0]*y.shape[1], -1)
+                    metrics = cal_metrics(logits.detach().cpu(), y.detach().cpu())
 
-                        metrics_inverse = cal_metrics(scaler.inverse_transform(logits.detach().cpu()), scaler.inverse_transform(y.detach().cpu()))
+                    logits = logits.reshape(logits.shape[0], pred_len, -1)
+                    y = y.reshape(y.shape[0], pred_len, -1)
+                    logits = logits.reshape(logits.shape[0]*logits.shape[1], -1)
+                    y = y.reshape(y.shape[0]*y.shape[1], -1)
 
-                        loss_epoch.append(loss.item())
-                        mae_epoch.append(metrics['MAE'].item())
-                        mse_epoch.append(metrics['MSE'].item())
-                        mse_epoch_inv.append(metrics_inverse['MSE'].item())
-                        mae_epoch_inv.append(metrics_inverse['MAE'].item())
+                    metrics_inverse = cal_metrics(scaler.inverse_transform(logits.detach().cpu()), scaler.inverse_transform(y.detach().cpu()))
 
-                    avg_test_loss = get_avg(loss_epoch)
-                    avg_test_mse = get_avg(mse_epoch)
-                    avg_test_mae = get_avg(mae_epoch)
-                    avg_test_mse_inv = get_avg(mse_epoch_inv)
-                    avg_test_mae_inv = get_avg(mae_epoch_inv)
+                    loss_epoch.append(loss.item())
+                    mae_epoch.append(metrics['MAE'].item())
+                    mse_epoch.append(metrics['MSE'].item())
+                    mse_epoch_inv.append(metrics_inverse['MSE'].item())
+                    mae_epoch_inv.append(metrics_inverse['MAE'].item())
+
+                avg_test_loss = get_avg(loss_epoch)
+                avg_test_mse = get_avg(mse_epoch)
+                avg_test_mae = get_avg(mae_epoch)
+                avg_test_mse_inv = get_avg(mse_epoch_inv)
+                avg_test_mae_inv = get_avg(mae_epoch_inv)
+                if pred_len in loss_test_avg:
+                    loss_test_avg[pred_len].append(avg_test_loss)
+                else:
+                    loss_test_avg[pred_len] = [avg_test_loss]
 
 
-                    print("Testing: \n Average test Loss: {}\n Test MAE: {}\n Test MSE: {}\n".format(avg_test_loss, avg_test_mae, avg_test_mse))
-                    print("Pretrain: {}; Label ratio: {}".format(args.pretrain, args.labelled_ratio))
+                print("Testing: \n Average test Loss: {}\n Test MAE: {}\n Test MSE: {}\n".format(avg_test_loss, avg_test_mae, avg_test_mse))
+                print("Pretrain: {}; Label ratio: {}".format(args.pretrain, args.labelled_ratio))
 
+                if avg_val_mse == best_val_mse:
                     ours_result[int(pred_len)] = {
                         'norm': {
                             'MAE': avg_test_mae,
@@ -320,8 +343,23 @@ if __name__ == '__main__':
                         }
                     }
 
-    with open(f'save/finetune/{args.mode}/{dataset_name}/eval_res.json', 'w') as f:
+    with open(f'./{args.model_path}/forecasting/B{args.batch_size}_E{args.emb_dim}/{args.mode}/{dir}/eval_res.json',
+              'w') as f:
         eval_res = {
             'ours': ours_result
         }
         json.dump(eval_res, f, indent=4)
+
+    with open(
+            f'./{args.model_path}/forecasting/B{args.batch_size}_E{args.emb_dim}/{args.mode}/{dir}/loss_train_avg.json',
+            'w') as f:
+        json.dump(loss_train_avg, f, indent=4)
+
+    with open(f'./{args.model_path}/forecasting/B{args.batch_size}_E{args.emb_dim}/{args.mode}/{dir}/loss_val_avg.json',
+              'w') as f:
+        json.dump(loss_val_avg, f, indent=4)
+
+    with open(
+            f'./{args.model_path}/forecasting/B{args.batch_size}_E{args.emb_dim}/{args.mode}/{dir}/loss_test_avg.json',
+            'w') as f:
+        json.dump(loss_test_avg, f, indent=4)
