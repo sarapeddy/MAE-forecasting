@@ -14,7 +14,7 @@ We first introduce the basic frameworks for contrastive and generative SSL, resp
 
 <br/>
 
-![](img/frameworks.png)
+![](MAE/images/frameworks.png)
 <center>Frameworks of contrastive and generative self-supervised representation learning</center>
 
 <br/>
