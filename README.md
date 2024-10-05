@@ -1,7 +1,7 @@
 # MAE: Implementation with 2 - step pipeline
 
 <p align="center">
-    <img src="/demo/simts.png" alt="simts" width=600>
+    <img src="/images/mae.png" alt="mae" width=600>
 </p>
 
 ## Dependencies
@@ -18,5 +18,3 @@ To run the experiments on forecasting task use the following command:
 sh forecasting.sh
 ```
 After training and evaluation, the trained encoder, output and evaluation metrics can be found in `training/forecasting/B{batch_size}_E{output_repr_dim}/<mode>/DatasetName__RunName_Date_Time/`.
-
-To run the experiments on classification task use the following command:
